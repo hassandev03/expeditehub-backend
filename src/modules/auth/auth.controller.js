@@ -15,7 +15,7 @@ async function login(httpRequest, httpResponse, nextMiddleware) {
     const { email, password } = httpRequest.body;
 
     // +password required because the field has select:false on the schema
-    const foundEmployee = await Employee.findOne({ email }).select('+password');
+    const foundEmployee = await Employee.findOne({ email }).populate('tenantId').select('+password');
 
     // Deliberately generic message to prevent email enumeration
     if (!foundEmployee || !foundEmployee.isActive) {
@@ -30,7 +30,7 @@ async function login(httpRequest, httpResponse, nextMiddleware) {
     const accessToken = jwt.sign(
       {
         sub: foundEmployee._id,
-        tenantId: foundEmployee.tenantId,
+        tenantId: foundEmployee.tenantId ? foundEmployee.tenantId._id : null,
         role: foundEmployee.role,
         jti: generateUniqueTokenIdentifier()
       },
@@ -41,7 +41,7 @@ async function login(httpRequest, httpResponse, nextMiddleware) {
     const refreshToken = jwt.sign(
       {
         sub: foundEmployee._id,
-        tenantId: foundEmployee.tenantId,
+        tenantId: foundEmployee.tenantId ? foundEmployee.tenantId._id : null,
         jti: generateUniqueTokenIdentifier()
       },
       process.env.REFRESH_TOKEN_SECRET,
@@ -55,8 +55,9 @@ async function login(httpRequest, httpResponse, nextMiddleware) {
         _id: foundEmployee._id,
         fullName: foundEmployee.fullName,
         role: foundEmployee.role,
-        tenantId: foundEmployee.tenantId
-      }
+        tenantId: foundEmployee.tenantId ? foundEmployee.tenantId._id : null
+      },
+      tenant: foundEmployee.tenantId
     });
   } catch (unexpectedError) {
     nextMiddleware(unexpectedError);
