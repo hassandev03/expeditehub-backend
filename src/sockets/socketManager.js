@@ -75,11 +75,17 @@ function emitDelayedOrderAlert(tenantId, orderId) {
   socketIOInstance.to(`chef:${tenantId}`).emit('order_delayed', { orderId });
 }
 
+function emitOrderPaid(tenantId, orderId) {
+  if (!socketIOInstance) return;
+  socketIOInstance.to(`chef:${tenantId}`).emit('order_paid', { orderId });
+}
+
 module.exports = {
   initSocket,
   emitNewOrder,
   emitOrderReady,
   emitItemUnavailable,
   emitMenuInvalidation,
-  emitDelayedOrderAlert
+  emitDelayedOrderAlert,
+  emitOrderPaid
 };

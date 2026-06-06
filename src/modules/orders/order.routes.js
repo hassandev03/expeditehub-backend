@@ -31,7 +31,7 @@ orderRouter.post('/', authorise('cashier'), createOrderValidationRules, createOr
 
 // /history must be defined before /:id to prevent Express from treating "history" as an ID param
 orderRouter.get('/history', authorise('admin'), listOrderHistory);
-orderRouter.get('/', authorise('chef'), listActiveOrders);
+orderRouter.get('/', authorise('chef', 'cashier'), listActiveOrders);
 
 orderRouter.patch('/:id/status', authorise('chef'), updateOrderStatusValidationRules, updateOrderStatus);
 orderRouter.patch('/:id/pay', authorise('cashier'), payOrder);

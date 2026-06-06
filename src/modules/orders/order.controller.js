@@ -2,7 +2,7 @@ const { validationResult } = require('express-validator');
 const MenuItem = require('../menuItems/menuItem.model');
 const Order = require('./order.model');
 const { redisClient } = require('../../../config/redis');
-const { emitNewOrder, emitOrderReady } = require('../../sockets/socketManager');
+const { emitNewOrder, emitOrderReady, emitOrderPaid } = require('../../sockets/socketManager');
 
 function getTodayDateString() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -283,6 +283,8 @@ async function payOrder(httpRequest, httpResponse, nextMiddleware) {
         redisPipelineError.message
       );
     }
+
+    emitOrderPaid(httpRequest.tenantId.toString(), savedOrder._id.toString());
 
     return httpResponse.status(200).json({ message: 'Order marked as paid', order: savedOrder });
   } catch (unexpectedError) {
