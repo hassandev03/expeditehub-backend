@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const { redisClient } = require('../../config/redis');
 
 let socketIOInstance = null;
@@ -13,6 +14,9 @@ function initSocket(httpServer) {
   socketIOInstance = new Server(httpServer, {
     cors: { origin: '*' }
   });
+
+  const redisSubscriberClient = redisClient.duplicate();
+  socketIOInstance.adapter(createAdapter(redisClient, redisSubscriberClient));
 
   socketIOInstance.on('connection', (connectedSocket) => {
     connectedSocket.on('join', async () => {

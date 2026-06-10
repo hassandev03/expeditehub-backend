@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const MenuItem = require('../menuItems/menuItem.model');
 const Order = require('./order.model');
 const { redisClient } = require('../../../config/redis');
+const { kafkaProducer } = require('../../../config/kafka');
 const { emitNewOrder, emitOrderReady, emitOrderPaid } = require('../../sockets/socketManager');
 
 function getTodayDateString() {
@@ -219,68 +220,35 @@ async function payOrder(httpRequest, httpResponse, nextMiddleware) {
     foundOrder.status = 'Paid';
     const savedOrder = await foundOrder.save();
 
-    // Fire all Redis analytics counters atomically via a pipeline
     const todayDateString = getTodayDateString();
-    const currentWeekString = getCurrentWeekString();
-    const currentMonthString = getCurrentMonthString();
     const tenantIdentifierString = httpRequest.tenantId.toString();
     const cashierIdentifierString = savedOrder.cashierId.toString();
 
-    const categoryRevenueAccumulator = new Map();
-    for (const orderItem of savedOrder.items) {
-      const existingCategoryTotal = categoryRevenueAccumulator.get(orderItem.category) || 0;
-      categoryRevenueAccumulator.set(
-        orderItem.category,
-        existingCategoryTotal + orderItem.price * orderItem.quantity
-      );
-    }
+    const orderPaidPayload = {
+      orderId: savedOrder._id.toString(),
+      tenantId: tenantIdentifierString,
+      totalAmount: savedOrder.totalAmount,
+      items: savedOrder.items.map((item) => ({
+        category: item.category,
+        price: item.price,
+        quantity: item.quantity
+      })),
+      cashierId: cashierIdentifierString,
+      chefId: savedOrder.chefId ? savedOrder.chefId.toString() : null,
+      todayDateString,
+      currentWeekString: getCurrentWeekString(),
+      currentMonthString: getCurrentMonthString()
+    };
 
-    const analyticsRedisPipeline = redisClient.pipeline();
-
-    analyticsRedisPipeline.incrbyfloat(
-      `revenue:daily:${tenantIdentifierString}:${todayDateString}`,
-      savedOrder.totalAmount
-    );
-    analyticsRedisPipeline.incr(`orders:daily:${tenantIdentifierString}:${todayDateString}`);
-    analyticsRedisPipeline.incrbyfloat(
-      `revenue:weekly:${tenantIdentifierString}:${currentWeekString}`,
-      savedOrder.totalAmount
-    );
-    analyticsRedisPipeline.incr(`orders:weekly:${tenantIdentifierString}:${currentWeekString}`);
-    analyticsRedisPipeline.incrbyfloat(
-      `revenue:monthly:${tenantIdentifierString}:${currentMonthString}`,
-      savedOrder.totalAmount
-    );
-    analyticsRedisPipeline.incr(`orders:monthly:${tenantIdentifierString}:${currentMonthString}`);
-
-    for (const [categoryName, categoryRevenue] of categoryRevenueAccumulator) {
-      analyticsRedisPipeline.incrbyfloat(
-        `revenue:category:${tenantIdentifierString}:${categoryName}:${todayDateString}`,
-        categoryRevenue
-      );
-    }
-
-    analyticsRedisPipeline.incrbyfloat(
-      `revenue:cashier:${tenantIdentifierString}:${cashierIdentifierString}:${todayDateString}`,
-      savedOrder.totalAmount
-    );
-    analyticsRedisPipeline.incr(
-      `orders:cashier:${tenantIdentifierString}:${cashierIdentifierString}:${todayDateString}`
-    );
-
-    if (savedOrder.chefId) {
-      analyticsRedisPipeline.incr(
-        `orders:chef:${tenantIdentifierString}:${savedOrder.chefId.toString()}:${todayDateString}`
-      );
-    }
-
-    // Per spec: Redis pipeline failure must not fail the request — order is already Paid in MongoDB
     try {
-      await analyticsRedisPipeline.exec();
-    } catch (redisPipelineError) {
+      await kafkaProducer.send({
+        topic: 'order.paid',
+        messages: [{ key: tenantIdentifierString, value: JSON.stringify(orderPaidPayload) }]
+      });
+    } catch (kafkaProduceError) {
       console.error(
-        'Redis analytics pipeline failed after order payment — analytics may be stale:',
-        redisPipelineError.message
+        'Kafka produce failed after order payment — analytics consumer will not receive this event:',
+        kafkaProduceError.message
       );
     }
 
